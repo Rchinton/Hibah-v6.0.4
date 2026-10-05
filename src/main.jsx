@@ -18,12 +18,14 @@ import {
   Database,
   Eye,
   EyeOff,
+  ExternalLink,
   FileCog,
   Filter,
   Gauge,
   Grid2X2,
   LogIn,
   LogOut,
+  Megaphone,
   Menu,
   MoreHorizontal,
   Palette,
@@ -69,6 +71,9 @@ const initialUsers = [
   { id: 'u3', name: 'Bagus Pratama', username: 'bagus', email: 'bagus@dinas.go.id', password: 'bagus123', role: 'user', status: 'Nonaktif' },
 ]
 
+const DEFAULT_ANNOUNCEMENT = 'Pengumuman-pengumuman.... mohon perhatian...!'
+const DEFAULT_ANNOUNCEMENT_STYLE = { textColor: '#000000', backgroundColor: '#f4f4a4', fontSize: 12, speed: 24, transparency: 0 }
+
 const databaseStateProperties = {
   'hibah-fields': 'fields',
   'hibah-records': 'records',
@@ -84,6 +89,7 @@ const navItems = [
   { id: 'database', label: 'Database hibah', icon: Database },
   { id: 'fields', label: 'Config field', icon: FileCog, admin: true },
   { id: 'verification-database', label: 'Database Verifikasi Hibah', icon: ClipboardCheck },
+  { id: 'library', label: 'Pustaka', icon: BookOpen },
   { id: 'verification-config', label: 'Config Form Verifikasi', icon: FileCog, admin: true },
 ]
 
@@ -441,6 +447,9 @@ function App() {
   const [accountModalOpen, setAccountModalOpen] = useState(false)
   const [syncStatus, setSyncStatus] = useState('idle')
   const [lastSyncAt, setLastSyncAt] = useState(null)
+  const [announcement, setAnnouncement] = useState(DEFAULT_ANNOUNCEMENT)
+  const [announcementStyle, setAnnouncementStyle] = useState(DEFAULT_ANNOUNCEMENT_STYLE)
+  const [libraryItems, setLibraryItems] = useState([])
   useEffect(() => {
     const handleSyncError = () => setSyncStatus('error')
     const handleSyncSuccess = () => {
@@ -477,6 +486,33 @@ function App() {
     document.addEventListener('click', handleProfileEdit)
     return () => document.removeEventListener('click', handleProfileEdit)
   }, [])
+  useEffect(() => {
+    if (!isLoggedIn) return
+    let cancelled = false
+    fetch('/api/index.php?action=app-settings')
+      .then(async (response) => {
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Pengumuman tidak dapat dimuat.')
+        if (!cancelled) {
+          setAnnouncement(result.announcement || DEFAULT_ANNOUNCEMENT)
+          setAnnouncementStyle({ ...DEFAULT_ANNOUNCEMENT_STYLE, ...result.style })
+        }
+      })
+      .catch((error) => console.error('Gagal memuat pengumuman aplikasi:', error))
+    return () => { cancelled = true }
+  }, [isLoggedIn])
+  useEffect(() => {
+    if (!isLoggedIn) return
+    let cancelled = false
+    fetch('/api/index.php?action=library')
+      .then(async (response) => {
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Pustaka tidak dapat dimuat.')
+        if (!cancelled) setLibraryItems(Array.isArray(result.items) ? result.items : [])
+      })
+      .catch((error) => console.error('Gagal memuat Pustaka:', error))
+    return () => { cancelled = true }
+  }, [isLoggedIn])
   useEffect(() => {
     const migratedRecords = records.map((record, index) => ({ ...record, noId: record.noId || formatGrantId(index + 1) }))
     if (migratedRecords.some((record, index) => record.noId !== records[index].noId)) setRecords(migratedRecords)
@@ -518,10 +554,35 @@ function App() {
     }
   }
 
+  const saveAnnouncement = async (value, style) => {
+    const response = await fetch('/api/index.php?action=app-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ announcement: value, style }),
+    })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.error || 'Pengumuman tidak dapat disimpan.')
+    setAnnouncement(result.announcement)
+    setAnnouncementStyle({ ...DEFAULT_ANNOUNCEMENT_STYLE, ...result.style })
+    return result
+  }
+
+  const saveLibraryItems = async (items) => {
+    const response = await fetch('/api/index.php?action=library', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.error || 'Pustaka tidak dapat disimpan.')
+    setLibraryItems(result.items)
+    return result.items
+  }
+
   const logout = () => { fetch('/api/index.php?action=logout', { method: 'POST' }).catch((error) => console.error('Gagal mengakhiri sesi server:', error)); localStorage.removeItem('hibah-auth'); localStorage.removeItem('hibah-user-id'); setActiveUserId(null); setIsLoggedIn(false) }
   const activeUser = users.find((user) => user.id === activeUserId) || users.filter((user) => user.role === role && user.status === 'Aktif').at(-1) || users[0]
   const visibleFields = fields.filter((field) => field.active)
-  const translations = language === 'id' ? { dashboard: 'Ringkasan', database: 'Database hibah', fields: 'Config field', settings: 'Pengaturan', welcome: 'Selamat datang kembali', records: 'Total Kelompok', approved: 'Disetujui', pending: 'Dalam proses', value: 'Pagu Anggaran', recent: 'Pengajuan terbaru' } : { dashboard: 'Overview', database: 'Grant database', fields: 'Field config', settings: 'Settings', welcome: 'Welcome back', records: 'Total groups', approved: 'Approved', pending: 'In progress', value: 'Budget allocation', recent: 'Recent applications' }
+  const translations = language === 'id' ? { dashboard: 'Dashboard', database: 'Database hibah', fields: 'Config field', settings: 'Pengaturan', welcome: 'Selamat datang kembali', records: 'Total Kelompok', approved: 'Disetujui', pending: 'Dalam proses', value: 'Pagu Anggaran', recent: 'Pengajuan terbaru' } : { dashboard: 'Overview', database: 'Grant database', fields: 'Field config', settings: 'Settings', welcome: 'Welcome back', records: 'Total groups', approved: 'Approved', pending: 'In progress', value: 'Budget allocation', recent: 'Recent applications' }
 
   if (!isLoggedIn) return <LoginScreen onSubmit={login} error={loginError} isLoggingIn={isLoggingIn} loginSuccessName={loginSuccessName} role={role} setRole={setRole} />
 
@@ -530,6 +591,7 @@ function App() {
       <Sidebar activePage={activePage} setActivePage={(page) => { setActivePage(page); setMobileMenuOpen(false) }} role={role} user={activeUser} t={translations} onLogout={() => setShowLogoutConfirm(true)} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((current) => !current)} mobileOpen={mobileMenuOpen} />
       <main className="main-content">
         <Topbar onMenu={() => setMobileMenuOpen((current) => !current)} user={activeUser} theme={theme} setTheme={setTheme} language={language} setLanguage={setLanguage} t={translations} profileMenuOpen={profileMenuOpen} onProfileMenu={() => setProfileMenuOpen((current) => !current)} onManageAccount={() => { setProfileMenuOpen(false); setAccountModalOpen(true) }} onLogout={() => { setProfileMenuOpen(false); setShowLogoutConfirm(true) }} onSync={syncNow} syncStatus={syncStatus} lastSyncAt={lastSyncAt} />
+        {activePage === 'overview' && <AnnouncementTicker message={announcement} style={announcementStyle} />}
         <div className="content-wrap" data-page={activePage}>
           {activePage === 'overview' && <Overview records={records} fields={visibleFields} verifications={verifications} user={activeUser} t={translations} onNavigate={setActivePage} />}
           {activePage === 'database' && <DatabasePage key={activeUser.id} records={records} setRecords={setRecords} fields={visibleFields} allFields={fields} verificationFields={verificationFields} verifications={verifications} setVerifications={setVerifications} user={activeUser} role={role} t={translations} />}
@@ -538,7 +600,8 @@ function App() {
           {activePage === 'verification-config' && role === 'superadmin' && <VerificationFieldsPage fields={verificationFields} setFields={setVerificationFields} />}
           {activePage === 'verification-config' && role !== 'superadmin' && <AccessDenied onBack={() => setActivePage('overview')} />}
           {activePage === 'verification-database' && <VerificationDatabasePage records={records} verifications={verifications} setVerifications={setVerifications} verificationFields={verificationFields} hibahFields={visibleFields} user={activeUser} />}
-          {activePage === 'settings' && <SettingsPage user={activeUser} onEditAccount={() => setAccountModalOpen(true)} theme={theme} setTheme={setTheme} language={language} setLanguage={setLanguage} />}
+          {activePage === 'library' && <LibraryPage items={libraryItems} />}
+          {activePage === 'settings' && <SettingsPage user={activeUser} onEditAccount={() => setAccountModalOpen(true)} theme={theme} setTheme={setTheme} language={language} setLanguage={setLanguage} announcement={announcement} announcementStyle={announcementStyle} onSaveAnnouncement={saveAnnouncement} libraryItems={libraryItems} onSaveLibrary={saveLibraryItems} />}
           {activePage === 'users' && role === 'superadmin' && <UsersPage users={users} setUsers={setUsers} currentUser={activeUser} />}
           {activePage === 'users' && role !== 'superadmin' && <AccessDenied onBack={() => setActivePage('overview')} />}
         </div>
@@ -565,7 +628,7 @@ function LogoutConfirm({ onCancel, onConfirm }) {
 }
 
 function Sidebar({ activePage, setActivePage, role, user, t, onLogout, collapsed, onToggle, mobileOpen }) {
-  return <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}><div className="sidebar-brand"><span className="brand-mark logo-brand"><img src={agencyLogo} alt="Logo E-HIBAH" /></span><div><strong>E-HIBAH</strong><small>Hibah Bidang Peternakan</small></div></div><button className="sidebar-toggle" onClick={onToggle} aria-label={collapsed ? 'Tampilkan menu' : 'Sembunyikan menu'} title={collapsed ? 'Tampilkan menu' : 'Sembunyikan menu'}>{collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><div className="workspace-switch"><span className="workspace-icon"><Grid2X2 size={16} /></span><span><small>WORKSPACE</small><strong>Jawa Tengah</strong></span><ChevronDown size={15} /></div><nav><p className="nav-caption">Menu utama</p>{navItems.filter((item) => !item.admin || role === 'superadmin').map((item) => {
+  return <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}><div className="sidebar-brand"><button type="button" className="brand-mark logo-brand" onClick={() => setActivePage('overview')} aria-label="Kembali ke dashboard" title="Kembali ke dashboard"><img src={agencyLogo} alt="" /></button><div><strong>E-HIBAH</strong><small>Hibah Bidang Peternakan</small></div></div><button className="sidebar-toggle" onClick={onToggle} aria-label={collapsed ? 'Tampilkan menu' : 'Sembunyikan menu'} title={collapsed ? 'Tampilkan menu' : 'Sembunyikan menu'}>{collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><div className="workspace-switch"><span className="workspace-icon"><Grid2X2 size={16} /></span><span><small>WORKSPACE</small><strong>Jawa Tengah</strong></span><ChevronDown size={15} /></div><nav><p className="nav-caption">Menu utama</p>{navItems.filter((item) => !item.admin || role === 'superadmin').map((item) => {
     const Icon = item.icon
     const label = item.id === 'overview' ? t.dashboard : item.id === 'database' ? t.database : item.id === 'fields' ? t.fields : item.label
     return <button key={item.id} className={`nav-item ${activePage === item.id ? 'active' : ''}`} onClick={() => setActivePage(item.id)} title={collapsed ? label : undefined}><Icon size={18} /><span>{label}</span></button>
@@ -879,7 +942,7 @@ function Overview({ records, fields, verifications, user, t, onNavigate }) {
   ]
   const getVerificationCategory = (record) => {
     const verification = verificationByRecord.get(String(record.id))
-    const status = String(verification?.status || record.status || '').trim().toLowerCase()
+    const status = String(verification ? verification.status : record.status || '').trim().toLowerCase()
     if (['terverifikasi', 'lolos', 'disetujui'].includes(status)) return 'passed'
     if (['ditolak', 'tidak lolos', 'perlu perbaikan'].includes(status)) return 'failed'
     return 'unverified'
@@ -1005,7 +1068,6 @@ function Overview({ records, fields, verifications, user, t, onNavigate }) {
           <button className="primary-btn" onClick={() => onNavigate('database')}><Plus size={16} /> Pengajuan baru</button>
         </div>
       </section>
-
       <section className="stat-grid">
         <StatCard icon={UsersRound} label={t.records} value={focusRecords.length} change={recordsChange} tone="mint" />
         <StatCard icon={Check} label={t.approved} value={approved} change={approvedChange} tone="yellow" />
@@ -1537,52 +1599,16 @@ function CombinedPokjaDonut({ data, totalBudget, year }) {
 }
 
 function IroWheelColorPicker({ color, onChange }) {
-  const pickerNodeRef = useRef(null)
-  const pickerRef = useRef(null)
-  const onChangeRef = useRef(onChange)
+  const match = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(color || '')
+  const hexColor = match ? `#${match[1]}` : '#59a96d'
+  const alpha = match?.[2] ? Number.parseInt(match[2], 16) : 255
+  const transparency = Math.round((255 - alpha) / 255 * 100)
+  const alphaHex = (percent) => Math.round((100 - percent) / 100 * 255).toString(16).padStart(2, '0')
 
-  useEffect(() => {
-    onChangeRef.current = onChange
-  }, [onChange])
-
-  useEffect(() => {
-    let mounted = true
-    let picker
-    let handleColorChange
-
-    import('@jaames/iro').then(({ default: iro }) => {
-      if (!mounted || !pickerNodeRef.current) return
-      picker = new iro.ColorPicker(pickerNodeRef.current, {
-        width: 214,
-        color,
-        borderWidth: 1,
-        borderColor: '#dbe5e7',
-        layout: [
-          { component: iro.ui.Wheel },
-          { component: iro.ui.Slider, options: { sliderType: 'alpha' } },
-        ],
-      })
-      handleColorChange = (nextColor) => onChangeRef.current(nextColor.hex8String)
-      picker.on('color:change', handleColorChange)
-      pickerRef.current = picker
-    })
-
-    return () => {
-      mounted = false
-      if (picker && handleColorChange) picker.off('color:change', handleColorChange)
-      pickerRef.current = null
-      pickerNodeRef.current?.replaceChildren()
-    }
-  }, [])
-
-  useEffect(() => {
-    const picker = pickerRef.current
-    if (picker && picker.color.hex8String.toLowerCase() !== color.toLowerCase()) {
-      picker.color.hex8String = color
-    }
-  }, [color])
-
-  return <div className="iro-wheel-host" ref={pickerNodeRef} />
+  return <div className="native-dashboard-color-picker">
+    <label className="dashboard-color-choice"><span>Warna</span><span className="dashboard-color-input-wrap"><input type="color" aria-label="Pilih warna diagram" value={hexColor} onChange={(event) => onChange(`${event.target.value}${alpha.toString(16).padStart(2, '0')}`)} /><code>{hexColor.toUpperCase()}</code></span></label>
+    <label className="dashboard-alpha-control"><span>Transparansi <output>{transparency}%</output></span><input type="range" min="0" max="100" step="1" value={transparency} aria-label="Atur transparansi warna diagram" onChange={(event) => onChange(`${hexColor}${alphaHex(Number(event.target.value))}`)} /></label>
+  </div>
 }
 
 function BudgetMoneyIcon({ size }) { return <span className="budget-money-icon" style={{ '--icon-size': `${size}px` }} aria-hidden="true"><Banknote className="budget-money-note" /><Coins className="budget-money-coins" /></span> }
@@ -1692,13 +1718,41 @@ function VerificationFieldForm({ field, onClose, onSave }) {
 }
 
 function VerificationFormModal({ record, hibahFields, fields, verification, onClose, onSave }) {
-  const [values, setValues] = useState(verification?.values || Object.fromEntries(fields.map((field) => [field.key, field.type === 'checklist' ? [] : ''])))
-  const [status, setStatus] = useState(verification?.status || 'Terverifikasi')
+  const [values, setValues] = useState(() => {
+    const initialValues = verification?.values || Object.fromEntries(fields.map((field) => [field.key, field.type === 'checklist' ? [] : '']))
+    const savedChecklist = initialValues.verificationChecklist
+    return {
+      ...initialValues,
+      verificationChecklist: {
+        selected: Array.isArray(savedChecklist?.selected) ? savedChecklist.selected : [],
+        other: typeof savedChecklist?.other === 'string' ? savedChecklist.other : '',
+      },
+    }
+  })
+  const [status, setStatus] = useState(verification?.status || '')
   const visibleFields = fields.filter((field) => field.active)
   const sourceFields = hibahFields.filter((field) => field.active && !['header', 'separator'].includes(field.type))
+  const checklistOptions = ['Administrasi Dokumen', 'Verifikasi Faktual (cek lapangan)', 'Lain-lain']
+  const selectedChecks = values.verificationChecklist.selected
+  const budgetKeys = ['nilai_bantuan', 'pagu_anggaran', 'anggaran', 'anggaran_bantuan', 'nilai_anggaran', 'nominal_bantuan', 'jumlah_bantuan']
+  const budgetKey = budgetKeys.find((key) => record.values?.[key] !== undefined && record.values[key] !== null && record.values[key] !== '')
+    || hibahFields.find((field) => {
+      const key = String(field.key || '').toLowerCase()
+      const label = String(field.label || '').toLowerCase()
+      return !key.includes('tahun') && !label.includes('tahun') && (field.type === 'currency' || ['anggaran', 'pagu', 'nilai', 'bantuan', 'nominal'].some((term) => key.includes(term) || label.includes(term)))
+    })?.key
+  const budgetAmount = formatBudget(record.values?.[budgetKey]) || '-'
   const update = (key, value) => setValues((current) => ({ ...current, [key]: value }))
+  const updateChecklist = (key, value) => setValues((current) => ({
+    ...current,
+    verificationChecklist: { ...current.verificationChecklist, [key]: value },
+  }))
   const submit = (event) => {
     event.preventDefault()
+    if (selectedChecks.includes('Lain-lain') && !values.verificationChecklist.other.trim()) {
+      window.alert('Lengkapi keterangan untuk pilihan Lain-lain.')
+      return
+    }
     const missing = visibleFields.find((field) => field.required && (field.type === 'checklist' ? !values[field.key]?.length : !String(values[field.key] ?? '').trim()))
     if (missing) {
       window.alert(`Pertanyaan "${missing.label}" wajib diisi.`)
@@ -1706,7 +1760,75 @@ function VerificationFormModal({ record, hibahFields, fields, verification, onCl
     }
     onSave({ id: verification?.id, hibahId: record.id, noId: record.noId, status, values })
   }
-  return <div className="modal-backdrop"><div className="modal verification-modal"><div className="modal-head"><div><p className="eyebrow">FORM VERIFIKASI</p><h2>{verification ? 'Perbarui verifikasi' : 'Verifikasi data kelompok'}</h2><p className="muted">{record.noId} · {record.values.nama_kelompok || 'Kelompok hibah'}</p></div><button className="close-btn" onClick={onClose} aria-label="Tutup"><X size={19} /></button></div><form onSubmit={submit}><div className="verification-form-content"><section className="verification-source"><h3>Data pengajuan dari Database Hibah</h3><div className="verification-source-grid">{sourceFields.map((field) => <div key={field.id}><span>{field.label}</span><strong>{formatVerificationValue(record.values[field.key], field)}</strong></div>)}</div></section><div className="verification-controls"><label className="field-group">Hasil verifikasi <b>*</b><select value={status} onChange={(event) => setStatus(event.target.value)}><option>Terverifikasi</option><option>Proses Berlangsung</option><option>Perlu Perbaikan</option><option>Ditolak</option></select></label>{visibleFields.map((field) => <DynamicInputProfessional key={field.id} field={field} value={values[field.key]} onChange={(value) => update(field.key, value)} />)}{!visibleFields.length && <p className="muted">Belum ada pertanyaan aktif pada Config Form Verifikasi.</p>}</div></div><div className="modal-foot"><button type="button" className="secondary-btn" onClick={onClose}>Batal</button><button type="submit" className="primary-btn"><ClipboardCheck size={16} /> {verification ? 'Simpan perubahan' : 'Simpan verifikasi'}</button></div></form></div></div>
+  return (
+    <div className="modal-backdrop">
+      <div className="modal verification-modal">
+        <div className="modal-head verification-modal-head">
+          <div className="verification-modal-heading">
+            <div>
+              <p className="eyebrow">FORM VERIFIKASI</p>
+              <h2>{verification ? 'Perbarui verifikasi' : 'Verifikasi data kelompok'}</h2>
+              <p className="muted">{record.noId}</p>
+            </div>
+            <div className="verification-group-meta">
+              <strong>{record.values.nama_kelompok || 'Kelompok hibah'}</strong>
+              <b>{budgetAmount}</b>
+            </div>
+          </div>
+          <button className="close-btn" onClick={onClose} aria-label="Tutup"><X size={19} /></button>
+        </div>
+        <form onSubmit={submit}>
+          <div className="verification-form-content">
+            <section className="verification-source">
+              <h3>Data pengajuan dari Database Hibah</h3>
+              <div className="verification-source-grid">
+                {sourceFields.map((field) => <div key={field.id}><span>{field.label}</span><strong>{formatVerificationValue(record.values[field.key], field)}</strong></div>)}
+              </div>
+            </section>
+            <div className="verification-controls">
+              <label className="field-group">
+                Hasil verifikasi
+                <select value={status} onChange={(event) => setStatus(event.target.value)}>
+                  <option value="">Pilih hasil (opsional)</option>
+                  <option>Terverifikasi</option>
+                  <option>Proses Berlangsung</option>
+                  <option>Perlu Perbaikan</option>
+                  <option>Ditolak</option>
+                </select>
+              </label>
+              <div className="verification-checklist" role="group" aria-labelledby="verification-checklist-label">
+                <strong id="verification-checklist-label">Verifikasi:</strong>
+                <div className="check-grid">
+                  {checklistOptions.map((option) => (
+                    <label className="check-option" key={option}>
+                      <input
+                        type="checkbox"
+                        checked={selectedChecks.includes(option)}
+                        onChange={(event) => updateChecklist('selected', event.target.checked ? [...selectedChecks, option] : selectedChecks.filter((item) => item !== option))}
+                      />
+                      <span>{option}</span>
+                    </label>
+                  ))}
+                </div>
+                {selectedChecks.includes('Lain-lain') && (
+                  <label className="field-group verification-other">
+                    Keterangan Lain-lain <b>*</b>
+                    <textarea rows="3" required value={values.verificationChecklist.other} onChange={(event) => updateChecklist('other', event.target.value)} placeholder="Tuliskan keterangan verifikasi" />
+                  </label>
+                )}
+              </div>
+              {visibleFields.map((field) => <DynamicInputProfessional key={field.id} field={field} value={values[field.key]} onChange={(value) => update(field.key, value)} />)}
+              {!visibleFields.length && <p className="muted">Belum ada pertanyaan aktif pada Config Form Verifikasi.</p>}
+            </div>
+          </div>
+          <div className="modal-foot">
+            <button type="button" className="secondary-btn" onClick={onClose}>Batal</button>
+            <button type="submit" className="primary-btn"><ClipboardCheck size={16} /> {verification ? 'Simpan perubahan' : 'Simpan verifikasi'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
 }
 
 function formatVerificationValue(value, field) {
@@ -1807,7 +1929,7 @@ function VerificationDatabasePage({ records, verifications, setVerifications, ve
             <thead><tr><th>No</th><th>No ID Hibah</th><th>Kelompok penerima</th><th>Hasil verifikasi</th><th>Verifikator</th><th>Terakhir diperbarui</th><th>Aksi</th></tr></thead>
             <tbody>{filtered.map((item, index) => <tr key={item.id}>
               <td>{index + 1}</td><td>{item.noId}</td><td><strong>{item.hibahSnapshot?.nama_kelompok || '-'}</strong></td>
-              <td><span className={`verification-status verification-${item.status.toLowerCase().replace(/\s/g, '-')}`}>{item.status}</span></td>
+              <td><span className={`verification-status verification-${item.status ? item.status.toLowerCase().replace(/\s/g, '-') : 'unassigned'}`}>{item.status || 'Belum ditentukan'}</span></td>
               <td>{item.verifiedByName || '-'}</td><td>{item.updatedAt || item.createdAt || '-'}</td>
               <td><div className="row-actions"><button onClick={() => openEdit(item)} title="Edit verifikasi" aria-label={`Edit verifikasi ${item.noId}`}><Pencil size={15} /></button><button onClick={() => setDeleteTarget(item)} title="Hapus verifikasi" aria-label={`Hapus verifikasi ${item.noId}`}><Trash2 size={15} /></button></div></td>
             </tr>)}</tbody>
@@ -1923,10 +2045,25 @@ function DatabasePage({ records, setRecords, fields, allFields, verificationFiel
 }
 
 function RecordTable({ records, fields, onEdit, onDelete, onSelect, onVerify, verifications = [], compact, emptyMessage = 'Belum ada data hibah.' }) {
-  const tableFields = fields.filter(isDataField)
-  return <div className={`table-scroll ${compact ? 'compact-table' : ''}`}><table><thead><tr><th className="select-column"><input type="checkbox" /></th>{!compact && <th className="actions-column">Aksi</th>}<th className="row-number-column">No Urut</th><th className="grant-id-column">No ID</th><th>Nama kelompok <ArrowUpDown size={13} /></th>{tableFields.slice(0, compact ? 2 : 4).map((field) => <th key={field.id}>{field.label} <ArrowUpDown size={13} /></th>)}<th>Status</th></tr></thead><tbody>{records.map((record, index) => {
+  const locationColumns = [
+    { label: 'Kabupaten/Kota', keys: ['kabkot', 'kabupatenkota'] },
+    { label: 'Kecamatan', keys: ['kecamatan'] },
+    { label: 'Desa', keys: ['desa', 'desakelurahan', 'kelurahan'] },
+    { label: 'Alamat', keys: ['alamat'] },
+  ]
+  const normalizeLocationKey = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const isLocationField = (field) => locationColumns.some(({ keys }) => keys.includes(normalizeLocationKey(field.key)) || keys.includes(normalizeLocationKey(field.label)))
+  const tableFields = fields.filter((field) => isDataField(field) && (compact || !isLocationField(field)))
+  const getLocationValue = (values, location) => {
+    const field = fields.find((item) => location.keys.includes(normalizeLocationKey(item.key)) || location.keys.includes(normalizeLocationKey(item.label)))
+    const recordKey = Object.keys(values || {}).find((key) => location.keys.includes(normalizeLocationKey(key)))
+    const key = [field?.key, ...location.keys, recordKey].find((candidate) => candidate && values?.[candidate] !== undefined && values[candidate] !== null && values[candidate] !== '')
+    const value = key ? values[key] : ''
+    return Array.isArray(value) ? value.join(', ') || '-' : value || '-'
+  }
+  return <div className={`table-scroll ${compact ? 'compact-table' : ''}`}><table><thead><tr><th className="select-column"><input type="checkbox" /></th>{!compact && <th className="actions-column">Aksi</th>}<th className="row-number-column">No Urut</th><th className="grant-id-column">No ID</th><th>Nama kelompok <ArrowUpDown size={13} /></th>{!compact && locationColumns.map((location) => <th key={location.label}>{location.label}</th>)}{tableFields.slice(0, compact ? 2 : 4).map((field) => <th key={field.id}>{field.label} <ArrowUpDown size={13} /></th>)}<th>Status</th></tr></thead><tbody>{records.map((record, index) => {
     const verification = verifications.find((item) => item.hibahId === record.id)
-    return <tr key={record.id} onClick={() => onSelect?.(record)}><td className="select-column"><input type="checkbox" onClick={(event) => event.stopPropagation()} /></td>{!compact && <td className="actions-column"><div className="row-actions"><button className="row-action-verify" onClick={(event) => { event.stopPropagation(); onVerify?.(record) }} title={verification ? 'Edit verifikasi data' : 'Verifikasi data'} aria-label={`${verification ? 'Edit verifikasi data' : 'Verifikasi data'} ${record.values.nama_kelompok}`}><ClipboardCheck size={15} /></button><button className="row-action-edit" onClick={(event) => { event.stopPropagation(); onEdit(record) }} title="Edit" aria-label={`Edit ${record.values.nama_kelompok}`}><Pencil size={15} /></button><button className="row-action-delete" onClick={(event) => { event.stopPropagation(); onDelete(record.id) }} title="Hapus" aria-label={`Hapus ${record.values.nama_kelompok}`}><Trash2 size={15} /></button></div></td>}<td className="row-number-column">{index + 1}</td><td className="grant-id-column">{record.noId || formatGrantId(index + 1)}</td><td><div className="name-cell"><span className="record-avatar">{record.values.nama_kelompok?.slice(0, 2).toUpperCase()}</span><span><strong>{record.values.nama_kelompok}</strong><small>Dibuat {record.createdAt}</small></span></div></td>{tableFields.slice(0, compact ? 2 : 4).map((field) => <td key={field.id}>{field.type === 'currency' || field.key === 'nilai_bantuan' ? formatBudget(record.values[field.key]) : Array.isArray(record.values[field.key]) ? record.values[field.key].join(', ') : record.values[field.key] || '-'}</td>)}<td><span className={`status status-${record.status.toLowerCase()}`}>{record.status}</span>{verification && <small className={`verification-inline-status verification-${verification.status.toLowerCase().replace(/\s/g, '-')}`}>{verification.status}</small>}</td></tr>
+    return <tr key={record.id} onClick={() => onSelect?.(record)}><td className="select-column"><input type="checkbox" onClick={(event) => event.stopPropagation()} /></td>{!compact && <td className="actions-column"><div className="row-actions"><button className="row-action-verify" onClick={(event) => { event.stopPropagation(); onVerify?.(record) }} title={verification ? 'Edit verifikasi data' : 'Verifikasi data'} aria-label={`${verification ? 'Edit verifikasi data' : 'Verifikasi data'} ${record.values.nama_kelompok}`}><ClipboardCheck size={15} /></button><button className="row-action-edit" onClick={(event) => { event.stopPropagation(); onEdit(record) }} title="Edit" aria-label={`Edit ${record.values.nama_kelompok}`}><Pencil size={15} /></button><button className="row-action-delete" onClick={(event) => { event.stopPropagation(); onDelete(record.id) }} title="Hapus" aria-label={`Hapus ${record.values.nama_kelompok}`}><Trash2 size={15} /></button></div></td>}<td className="row-number-column">{index + 1}</td><td className="grant-id-column">{record.noId || formatGrantId(index + 1)}</td><td><div className="name-cell"><span className="record-avatar">{record.values.nama_kelompok?.slice(0, 2).toUpperCase()}</span><span><strong>{record.values.nama_kelompok}</strong></span></div></td>{!compact && locationColumns.map((location) => <td key={location.label}>{getLocationValue(record.values, location)}</td>)}{tableFields.slice(0, compact ? 2 : 4).map((field) => <td key={field.id}>{field.type === 'currency' || field.key === 'nilai_bantuan' ? formatBudget(record.values[field.key]) : Array.isArray(record.values[field.key]) ? record.values[field.key].join(', ') : record.values[field.key] || '-'}</td>)}<td><span className={`status status-${record.status.toLowerCase()}`}>{record.status}</span>{verification && <small className={`verification-inline-status verification-${verification.status.toLowerCase().replace(/\s/g, '-')}`}>{verification.status}</small>}</td></tr>
   })}</tbody></table>{!records.length && <div className="empty-state">{emptyMessage}</div>}</div>
 }
 
@@ -1945,22 +2082,241 @@ function DetailModal({ record, fields, onClose }) { return <div className="modal
 function FieldsPage({ fields, setFields }) { const [showForm, setShowForm] = useState(false); const [editing, setEditing] = useState(null); const move = (index, direction) => { const next = [...fields]; const target = index + direction; if (target < 0 || target >= next.length) return; [next[index], next[target]] = [next[target], next[index]]; setFields(next.map((field, order) => ({ ...field, order }))) }; const save = (field) => { if (editing) setFields(fields.map((item) => item.id === editing.id ? { ...field, id: editing.id } : item)); else setFields([...fields, { ...field, id: `f${Date.now()}` }]); setShowForm(false); setEditing(null) }; const toggle = (id) => setFields(fields.map((field) => field.id === id ? { ...field, active: !field.active } : field)); return <><section className="page-heading compact-heading"><div><p className="eyebrow">KONFIGURASI SISTEM</p><h1>Config field</h1><p className="muted">Bentuk struktur data hibah tanpa mengubah kode aplikasi.</p></div><button className="primary-btn" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={16} /> Tambah field</button></section><div className="field-summary"><div><FileCog size={18} /><span><strong>{fields.length}</strong> Total field</span></div><div><Check size={18} /><span><strong>{fields.filter((field) => field.active).length}</strong> Field aktif</span></div><div><Activity size={18} /><span><strong>Live</strong> Sinkronisasi</span></div></div><div className="panel fields-panel"><div className="panel-head"><div><h2>Struktur field database</h2><p className="muted">Field aktif akan otomatis tampil di tabel dan form pengajuan.</p></div><button className="secondary-btn"><SlidersHorizontal size={16} /> Preview form</button></div><div className="field-list">{fields.map((field, index) => <div className={`field-row ${!field.active ? 'inactive' : ''} ${dragOverId === field.id ? 'drag-over' : ''}`} key={field.id}><div className="drag-handle"><span /><span /><span /></div><div className="field-order">{String(index + 1).padStart(2, '0')}</div><div className="field-info"><strong>{field.label}</strong><small>{field.key} · {typeLabels[field.type]}</small></div><span className="field-type">{typeLabels[field.type]}</span>{field.required && <span className="required-tag">Wajib</span>}<button className={`toggle ${field.active ? 'on' : ''}`} onClick={() => toggle(field.id)} aria-label={`${field.active ? 'Nonaktifkan' : 'Aktifkan'} ${field.label}`}><span /></button><div className="field-actions"><button onClick={() => move(index, -1)} title="Naikkan" aria-label={`Naikkan ${field.label}`}><ChevronUp size={14} /></button><button onClick={() => move(index, 1)} title="Turunkan" aria-label={`Turunkan ${field.label}`}><ChevronDown size={14} /></button><button onClick={() => { setEditing(field); setShowForm(true) }} title="Edit" aria-label={`Edit ${field.label}`}><Pencil size={15} /></button><button onClick={() => setDeleteTarget(field)} title="Hapus" aria-label={`Hapus ${field.label}`}><Trash2 size={15} /></button></div></div>)}</div></div>{showForm && <FieldFormProfessional field={editing} onClose={() => setShowForm(false)} onSave={save} />}</>
 }
 
-function FieldFormProfessional({ field, onClose, onSave }) { const [value, setValue] = useState(field || { label: '', key: '', type: 'text', required: false, active: true, options: '' }); const update = (key, next) => setValue((current) => ({ ...current, [key]: next })); const submit = (event) => { event.preventDefault(); onSave(value) }; return <div className="modal-backdrop"><div className="modal field-modal"><div className="modal-head"><div><p className="eyebrow">CONFIG FIELD</p><h2>{field ? 'Edit field' : 'Field baru'}</h2></div><button className="close-btn" onClick={onClose}><X size={19} /></button></div><form onSubmit={submit}><div className="dynamic-form"><label className="field-group">Label field <b>*</b><input required value={value.label} onChange={(event) => update('label', event.target.value)} placeholder="Contoh: Nama penerima" /></label><label className="field-group">Field key <b>*</b><input required value={value.key} onChange={(event) => update('key', event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))} placeholder="nama_penerima" /></label><label className="field-group">Tipe field <b>*</b><select value={value.type} onChange={(event) => update('type', event.target.value)}>{Object.entries(typeLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>{['checklist', 'list'].includes(value.type) && <label className="field-group full-span">Daftar opsi <b>*</b><textarea rows="5" required value={value.options} onChange={(event) => update('options', event.target.value)} placeholder="Pisahkan opsi dengan titik koma (;)" /><small className="field-hint">Contoh: Sapi;Kambing;Domba;Ayam</small></label>}<label className="switch-label"><input type="checkbox" checked={value.required} onChange={(event) => update('required', event.target.checked)} /><span>Field wajib diisi</span></label></div><div className="modal-foot"><button type="button" className="secondary-btn" onClick={onClose}>Batal</button><button type="submit" className="primary-btn"><Check size={16} /> Simpan field</button></div></form></div></div> }
+function FieldFormProfessional({ field, onClose, onSave }) {
+  const [value, setValue] = useState(field || { label: '', key: '', type: 'text', options: '', placeholder: '', description: '', required: false, active: true })
+  const update = (key, next) => setValue((current) => ({ ...current, [key]: next }))
+  const submit = (event) => { event.preventDefault(); onSave(value) }
 
-function SettingsPage({ user, onEditAccount, theme, setTheme, language, setLanguage }) {
+  return <div className="modal-backdrop"><div className="modal field-modal">
+    <div className="modal-head"><div><p className="eyebrow">CONFIG FIELD</p><h2>{field ? 'Edit field' : 'Field baru'}</h2></div><button className="close-btn" onClick={onClose}><X size={19} /></button></div>
+    <form onSubmit={submit}>
+      <div className="dynamic-form">
+        <label className="field-group">Label field <b>*</b><input required value={value.label} onChange={(event) => update('label', event.target.value)} placeholder="Contoh: Nama penerima" /></label>
+        <label className="field-group">Field key <b>*</b><input required value={value.key} onChange={(event) => update('key', event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))} placeholder="nama_penerima" /></label>
+        <label className="field-group">Tipe field <b>*</b><select value={value.type} onChange={(event) => update('type', event.target.value)}>{Object.entries(typeLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+        <label className="field-group">Placeholder<input value={value.placeholder || ''} onChange={(event) => update('placeholder', event.target.value)} placeholder="Contoh: Masukkan nama penerima" /></label>
+        <label className="field-group full-span">Deskripsi<textarea rows="3" value={value.description || ''} onChange={(event) => update('description', event.target.value)} placeholder="Petunjuk atau keterangan untuk pengisi form" /></label>
+        {['checklist', 'list'].includes(value.type) && <label className="field-group full-span">Daftar opsi <b>*</b><textarea rows="5" required value={value.options} onChange={(event) => update('options', event.target.value)} placeholder="Pisahkan opsi dengan titik koma (;)" /><small className="field-hint">Contoh: Sapi;Kambing;Domba;Ayam</small></label>}
+        <label className="switch-label"><input type="checkbox" checked={value.required} onChange={(event) => update('required', event.target.checked)} /><span>Field wajib diisi</span></label>
+      </div>
+      <div className="modal-foot"><button type="button" className="secondary-btn" onClick={onClose}>Batal</button><button type="submit" className="primary-btn"><Check size={16} /> Simpan field</button></div>
+    </form>
+  </div></div>
+}
+
+function AnnouncementTicker({ message, style }) {
+  if (!message?.trim()) return null
+  const bannerStyle = {
+    '--announcement-text-color': style.textColor,
+    '--announcement-background-color': style.backgroundColor,
+    '--announcement-font-size': `${style.fontSize}px`,
+    '--announcement-speed': `${style.speed}s`,
+    '--announcement-bg-opacity': `${100 - style.transparency}%`,
+  }
+  return <section className="announcement-banner" aria-label="Pengumuman" style={bannerStyle}>
+    <Megaphone size={20} aria-hidden="true" />
+    <div className="announcement-marquee" role="status">
+      <div className="announcement-track"><span>{message}</span><span aria-hidden="true">{message}</span></div>
+    </div>
+  </section>
+}
+
+function LibraryPage({ items }) {
+  return <>
+    <section className="page-heading compact-heading">
+      <div><p className="eyebrow">REFERENSI DOKUMEN</p><h1>Pustaka</h1><p className="muted">Dokumen dan tautan referensi untuk seluruh user.</p></div>
+    </section>
+    <section className="panel library-list-panel" aria-label="Daftar dokumen pustaka">
+      <div className="library-table-wrap"><table className="library-table"><thead><tr><th scope="col">No</th><th scope="col">Dokumen</th><th scope="col">Nomor dokumen</th><th scope="col">Tanggal dokumen</th></tr></thead><tbody>
+        {items.length ? items.map((item, index) => <tr key={item.id}><td>{index + 1}</td><td><a className="library-item" href={item.url} target="_blank" rel="noreferrer"><BookOpen size={18} /><span><strong>{item.name}</strong><small>{item.url}</small></span><ExternalLink size={16} /></a></td><td>{item.documentNumber || '-'}</td><td>{item.documentDate ? new Date(`${item.documentDate}T00:00:00`).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'}</td></tr>) : <tr><td colSpan="4" className="library-empty-cell">Belum ada dokumen di Pustaka.</td></tr>}
+      </tbody></table></div>
+    </section>
+  </>
+}
+
+function LibrarySettings({ items, onSave }) {
+  const [draft, setDraft] = useState(items)
+  const [isSaving, setIsSaving] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+  const [saveMessage, setSaveMessage] = useState('')
+  useEffect(() => setDraft(items), [items])
+  const updateItem = (id, key, value) => setDraft((current) => current.map((item) => item.id === id ? { ...item, [key]: value } : item))
+  const addItem = () => setDraft((current) => [...current, { id: `library-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name: '', documentNumber: '', documentDate: '', url: '' }])
+  const exportLibrary = () => {
+    const payload = { app: 'E-Hibah', type: 'library-items', version: 1, exportedAt: new Date().toISOString(), items: draft }
+    downloadFile(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), `e-hibah-pustaka-${new Date().toISOString().slice(0, 10)}.json`)
+  }
+  const importLibrary = async (event) => {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file) return
+    setIsImporting(true)
+    try {
+      const payload = JSON.parse(await file.text())
+      const imported = Array.isArray(payload) ? payload : payload?.items
+      if (!Array.isArray(imported) || imported.length > 500) throw new Error('Format file Pustaka tidak valid atau melebihi 500 dokumen.')
+      const normalized = imported.map((item, index) => {
+        const name = typeof item?.name === 'string' ? item.name.trim() : ''
+        const url = typeof item?.url === 'string' ? item.url.trim() : ''
+        const documentNumber = typeof item?.documentNumber === 'string' ? item.documentNumber.trim() : ''
+        const documentDate = typeof item?.documentDate === 'string' ? item.documentDate.trim() : ''
+        let parsedUrl
+        try { parsedUrl = new URL(url) } catch { throw new Error(`Hyperlink dokumen nomor ${index + 1} tidak valid.`) }
+        const isValidDate = !documentDate || (/^\d{4}-\d{2}-\d{2}$/.test(documentDate) && new Date(`${documentDate}T00:00:00Z`).toISOString().slice(0, 10) === documentDate)
+        if (!name || !['http:', 'https:'].includes(parsedUrl.protocol) || !isValidDate) throw new Error(`Data dokumen nomor ${index + 1} tidak valid.`)
+        return { id: typeof item.id === 'string' && item.id ? item.id : `library-import-${Date.now()}-${index}`, name, documentNumber, documentDate, url }
+      })
+      if (!window.confirm(`Impor ${normalized.length} dokumen dan mengganti draft Pustaka saat ini?`)) return
+      setDraft(normalized)
+      setSaveMessage('File diimpor. Simpan Pustaka untuk menerapkan perubahan.')
+    } catch (error) {
+      window.alert(error.message || 'File Pustaka tidak dapat dibaca.')
+    } finally {
+      setIsImporting(false)
+    }
+  }
+  const save = async (event) => {
+    event.preventDefault()
+    setIsSaving(true)
+    setSaveMessage('')
+    try {
+      await onSave(draft)
+      setSaveMessage('Pustaka berhasil disimpan.')
+    } catch (error) {
+      setSaveMessage(error.message || 'Pustaka gagal disimpan.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return <section className="panel system-settings-panel library-settings-panel">
+    <div className="panel-head"><div><p className="eyebrow">PENGATURAN SISTEM</p><h2>Pengaturan Pustaka</h2><p className="muted">Dokumen yang disimpan akan tersedia untuk semua user.</p></div><BookOpen size={19} /></div>
+    <form onSubmit={save}>
+      <div className="library-config-list">
+        {draft.map((item) => <div className="library-config-row" key={item.id}>
+          <label className="field-group">Nama dokumen<input required maxLength="180" value={item.name} onChange={(event) => updateItem(item.id, 'name', event.target.value)} placeholder="Contoh: Pedoman Hibah Peternakan" /></label>
+          <label className="field-group">Nomor dokumen<input maxLength="120" value={item.documentNumber || ''} onChange={(event) => updateItem(item.id, 'documentNumber', event.target.value)} placeholder="Nomor dokumen" /></label>
+          <label className="field-group">Tanggal dokumen<input type="date" value={item.documentDate || ''} onChange={(event) => updateItem(item.id, 'documentDate', event.target.value)} /></label>
+          <label className="field-group">Hyperlink<input required type="url" maxLength="2048" value={item.url} onChange={(event) => updateItem(item.id, 'url', event.target.value)} placeholder="https://" /></label>
+          <button type="button" className="library-remove-btn" onClick={() => setDraft((current) => current.filter((entry) => entry.id !== item.id))} aria-label={`Hapus ${item.name || 'dokumen'}`} title="Hapus dokumen"><Trash2 size={16} /></button>
+        </div>)}
+        {!draft.length && <p className="empty-state">Belum ada dokumen. Tambahkan nama dokumen dan hyperlink.</p>}
+      </div>
+      <div className="library-config-actions"><div className="library-config-file-actions"><label className={`secondary-btn library-import-btn ${isImporting ? 'is-importing' : ''}`}><Upload size={16} /> {isImporting ? 'Mengimpor...' : 'Import JSON'}<input className="visually-hidden" type="file" accept="application/json,.json" onChange={importLibrary} disabled={isImporting} /></label><button type="button" className="secondary-btn" onClick={exportLibrary}><ArrowDownToLine size={16} /> Export JSON</button><button type="button" className="secondary-btn" onClick={addItem}><Plus size={16} /> Tambah dokumen</button></div><div className="system-settings-actions"><span className="field-hint" role="status">{saveMessage}</span><button className="primary-btn" type="submit" disabled={isSaving}>{isSaving ? 'Menyimpan...' : 'Simpan Pustaka'}</button></div></div>
+    </form>
+  </section>
+}
+
+function SettingsPage({ user, onEditAccount, theme, setTheme, language, setLanguage, announcement, announcementStyle, onSaveAnnouncement, libraryItems, onSaveLibrary }) {
+  const [announcementDraft, setAnnouncementDraft] = useState(announcement)
+  const [announcementStyleDraft, setAnnouncementStyleDraft] = useState(announcementStyle)
+  const [isSavingAnnouncement, setIsSavingAnnouncement] = useState(false)
+  const [announcementSaveMessage, setAnnouncementSaveMessage] = useState('')
+  useEffect(() => setAnnouncementDraft(announcement), [announcement])
+  useEffect(() => setAnnouncementStyleDraft(announcementStyle), [announcementStyle])
   const themes = [
     { id: 'green', label: 'Green Pastel', color: '#236b48', description: 'Tenang dan natural' },
     { id: 'light', label: 'Light', color: '#2c5d7c', description: 'Bersih dan fokus' },
     { id: 'dark', label: 'Dark', color: '#202a25', description: 'Nyaman untuk malam' },
     { id: 'blue', label: 'Blue Sky', color: '#19718d', description: 'Segar dan profesional' },
   ]
-  return <><section className="page-heading compact-heading"><div><p className="eyebrow">PREFERENSI AKUN</p><h1>Pengaturan</h1><p className="muted">Sesuaikan pengalaman kerja sesuai kebutuhan Anda.</p></div><span className="saved-badge"><Check size={14} /> Tersimpan otomatis</span></section><div className="settings-grid"><section className="panel settings-panel"><div className="panel-head"><div><h2>Bahasa aplikasi</h2><p className="muted">Pilih bahasa untuk label dan navigasi utama.</p></div><BookOpen size={19} /></div><div className="language-options"><button className={language === 'id' ? 'selected' : ''} onClick={() => setLanguage('id')}><span className="flag-badge">ID</span><span><strong>Bahasa Indonesia</strong><small>Bahasa default sistem</small></span>{language === 'id' && <Check size={16} />}</button><button className={language === 'en' ? 'selected' : ''} onClick={() => setLanguage('en')}><span className="flag-badge flag-en">EN</span><span><strong>English</strong><small>Use English interface</small></span>{language === 'en' && <Check size={16} />}</button></div></section><section className="panel settings-panel"><div className="panel-head"><div><h2>Tema tampilan</h2><p className="muted">Preferensi ini hanya berlaku pada akun Anda.</p></div><Sparkles size={19} /></div><div className="theme-options">{themes.map((item) => <button key={item.id} className={theme === item.id ? 'selected' : ''} onClick={() => setTheme(item.id)}><span className="theme-swatch" style={{ background: item.color }} /><span><strong>{item.label}</strong><small>{item.description}</small></span>{theme === item.id && <Check size={16} />}</button>)}</div></section></div><section className="panel settings-account"><div className="account-avatar">AS</div><div><p className="eyebrow">AKUN AKTIF</p><h2>Admin Sistem</h2><p className="muted">admin@dinas.go.id · Superadmin</p></div><button className="secondary-btn">Edit profil</button></section></>
+  const updateAnnouncementStyle = (key, value) => setAnnouncementStyleDraft((current) => ({ ...current, [key]: value }))
+  const saveAnnouncement = async (event) => {
+    event.preventDefault()
+    setIsSavingAnnouncement(true)
+    setAnnouncementSaveMessage('')
+    try {
+      await onSaveAnnouncement(announcementDraft, announcementStyleDraft)
+      setAnnouncementSaveMessage('Pengumuman berhasil disimpan.')
+    } catch (error) {
+      setAnnouncementSaveMessage(error.message || 'Pengumuman gagal disimpan.')
+    } finally {
+      setIsSavingAnnouncement(false)
+    }
+  }
+
+  return <>
+    <section className="page-heading compact-heading"><div><p className="eyebrow">PREFERENSI AKUN</p><h1>Pengaturan</h1><p className="muted">Sesuaikan pengalaman kerja sesuai kebutuhan Anda.</p></div><span className="saved-badge"><Check size={14} /> Tersimpan otomatis</span></section>
+    <section className="panel settings-account"><div className="account-avatar">AS</div><div><p className="eyebrow">AKUN AKTIF</p><h2>{user?.name || 'Pengguna'}</h2><p className="muted">{user?.email || ''} · {user?.role === 'superadmin' ? 'Superadmin' : 'User'}</p></div><button className="secondary-btn" onClick={onEditAccount}>Edit profil</button></section>
+    <div className="settings-grid">
+      <section className="panel settings-panel"><div className="panel-head"><div><h2>Bahasa aplikasi</h2><p className="muted">Pilih bahasa untuk label dan navigasi utama.</p></div><BookOpen size={19} /></div><div className="language-options"><button className={language === 'id' ? 'selected' : ''} onClick={() => setLanguage('id')}><span className="flag-badge">ID</span><span><strong>Bahasa Indonesia</strong><small>Bahasa default sistem</small></span>{language === 'id' && <Check size={16} />}</button><button className={language === 'en' ? 'selected' : ''} onClick={() => setLanguage('en')}><span className="flag-badge flag-en">EN</span><span><strong>English</strong><small>Use English interface</small></span>{language === 'en' && <Check size={16} />}</button></div></section>
+      <section className="panel settings-panel"><div className="panel-head"><div><h2>Tema tampilan</h2><p className="muted">Preferensi ini hanya berlaku pada akun Anda.</p></div><Sparkles size={19} /></div><div className="theme-options">{themes.map((item) => <button key={item.id} className={theme === item.id ? 'selected' : ''} onClick={() => setTheme(item.id)}><span className="theme-swatch" style={{ background: item.color }} /><span><strong>{item.label}</strong><small>{item.description}</small></span>{theme === item.id && <Check size={16} />}</button>)}</div></section>
+    </div>
+    {user?.role === 'superadmin' && <section className="panel system-settings-panel"><div className="panel-head"><div><p className="eyebrow">PENGATURAN SISTEM</p><h2>Sistem Aplikasi</h2></div><Settings size={19} /></div><form onSubmit={saveAnnouncement}><div className="system-announcement-field"><strong>Pengumuman</strong><label className="field-group">Siaran<textarea rows="5" required maxLength="5000" value={announcementDraft} onChange={(event) => setAnnouncementDraft(event.target.value)} placeholder="Tulis pengumuman untuk seluruh user" /></label><div className="announcement-display-settings"><label className="announcement-color-control">Warna font<input type="color" value={announcementStyleDraft.textColor} onChange={(event) => updateAnnouncementStyle('textColor', event.target.value)} /></label><label className="announcement-color-control">Warna dasar / shading<input type="color" value={announcementStyleDraft.backgroundColor} onChange={(event) => updateAnnouncementStyle('backgroundColor', event.target.value)} /></label><label className="announcement-range-control"><span>Ukuran font <output>{announcementStyleDraft.fontSize} px</output></span><input type="range" min="10" max="28" step="1" value={announcementStyleDraft.fontSize} onChange={(event) => updateAnnouncementStyle('fontSize', Number(event.target.value))} /></label><label className="announcement-range-control"><span>Kecepatan running text <output>{announcementStyleDraft.speed} detik / putaran</output></span><input type="range" min="8" max="60" step="1" value={announcementStyleDraft.speed} onChange={(event) => updateAnnouncementStyle('speed', Number(event.target.value))} /></label><label className="announcement-range-control announcement-transparency-control"><span>Transparansi bilah <output>{announcementStyleDraft.transparency}%</output></span><input type="range" min="0" max="100" step="1" value={announcementStyleDraft.transparency} onChange={(event) => updateAnnouncementStyle('transparency', Number(event.target.value))} /></label></div></div><div className="system-settings-actions"><span className="field-hint" role="status">{announcementSaveMessage}</span><button className="primary-btn" type="submit" disabled={isSavingAnnouncement}><Check size={16} /> {isSavingAnnouncement ? 'Menyimpan...' : 'Simpan pengumuman'}</button></div></form></section>}
+    {user?.role === 'superadmin' && <LibrarySettings items={libraryItems} onSave={onSaveLibrary} />}
+  </>
 }
 
 function UsersPage({ users, setUsers, currentUser }) {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [isImporting, setIsImporting] = useState(false)
+
+  const exportUsers = () => {
+    const payload = {
+      app: 'E-Hibah',
+      type: 'user-accounts',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      users,
+    }
+    downloadFile(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), `e-hibah-users-${new Date().toISOString().slice(0, 10)}.json`)
+  }
+
+  const importUsers = async (event) => {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file) return
+
+    setIsImporting(true)
+    try {
+      const payload = JSON.parse(await file.text())
+      const imported = Array.isArray(payload) ? payload : payload?.users
+      const valid = Array.isArray(imported) && imported.length > 0 && imported.every((user) => user && typeof user.name === 'string' && typeof user.username === 'string' && typeof user.email === 'string' && ['superadmin', 'user'].includes(user.role || 'user'))
+      if (!valid) throw new Error('Format file pengguna tidak valid. Gunakan file JSON yang diekspor dari aplikasi ini.')
+
+      if (!window.confirm(`Impor ${imported.length} akun dari ${file.name}? Akun yang memiliki username atau email sama akan diperbarui.`)) return
+
+      const next = [...users]
+      imported.forEach((user, index) => {
+        const normalizedUser = {
+          id: user.id || `u${Date.now()}_${index}`,
+          name: String(user.name || '').trim(),
+          username: String(user.username || '').trim(),
+          email: String(user.email || '').trim(),
+          password: user.password || '',
+          contactWhatsapp: user.contactWhatsapp || '',
+          role: ['superadmin', 'user'].includes(user.role) ? user.role : 'user',
+          status: ['Aktif', 'Nonaktif'].includes(user.status) ? user.status : 'Aktif',
+        }
+
+        const existingIndex = next.findIndex((candidate) => {
+          if (candidate.id && normalizedUser.id && String(candidate.id) === String(normalizedUser.id)) return true
+          const sameUsername = candidate.username && candidate.username.toLowerCase() === normalizedUser.username.toLowerCase()
+          const sameEmail = candidate.email && candidate.email.toLowerCase() === normalizedUser.email.toLowerCase()
+          return sameUsername || sameEmail
+        })
+
+        if (existingIndex >= 0) {
+          next[existingIndex] = { ...next[existingIndex], ...normalizedUser }
+          return
+        }
+
+        next.push(normalizedUser)
+      })
+
+      setUsers(next)
+      window.alert(`Impor selesai: ${imported.length} akun diproses.`)
+    } catch (error) {
+      window.alert(error.message || 'File pengguna tidak dapat dibaca.')
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   const save = (user) => { if (editing) setUsers(users.map((item) => item.id === editing.id ? { ...user, id: editing.id } : item)); else setUsers([...users, { ...user, id: `u${Date.now()}` }]); setShowForm(false); setEditing(null) }
   const remove = () => {
     if (!deleteTarget) return
@@ -1979,7 +2335,10 @@ function UsersPage({ users, setUsers, currentUser }) {
     setDeleteTarget(null)
   }
   return <>
-    <section className="page-heading compact-heading"><div><p className="eyebrow">AKSES DAN PERAN</p><h1>Manajemen user</h1><p className="muted">Kelola akun yang dapat mengakses workspace hibah.</p></div><button className="primary-btn" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={16} /> Tambah user</button></section>
+    <section className="page-heading compact-heading"><div><p className="eyebrow">AKSES DAN PERAN</p><h1>Manajemen user</h1><p className="muted">Kelola akun yang dapat mengakses workspace hibah.</p></div><div className="user-page-actions"><label className={`secondary-btn user-import-btn ${isImporting ? 'is-importing' : ''}`}>
+      <Upload size={16} /> {isImporting ? 'Mengimpor...' : 'Import JSON'}
+      <input className="visually-hidden" type="file" accept="application/json,.json" onChange={importUsers} disabled={isImporting} />
+    </label><button className="secondary-btn" onClick={exportUsers}><ArrowDownToLine size={16} /> Export JSON</button><button className="primary-btn" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={16} /> Tambah user</button></div></section>
     <div className="user-summary"><span><strong>{users.length}</strong> Total akun</span><span><strong>{users.filter((user) => user.status === 'Aktif').length}</strong> Aktif</span><span><strong>{users.filter((user) => user.role === 'superadmin').length}</strong> Superadmin</span></div>
     <section className="panel users-panel"><div className="panel-head"><div><h2>Daftar pengguna</h2><p className="muted">Perubahan role berlaku pada login berikutnya.</p></div><ShieldCheck size={19} /></div><div className="user-list">{users.map((user) => <div className="user-row" key={user.id}><span className="user-avatar">{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><div className="user-info"><strong>{user.name}</strong><small>{user.email}</small><small>{user.contactWhatsapp || 'Kontak WhatsApp belum diisi'}</small></div><span className={`role-pill ${user.role}`}>{user.role === 'superadmin' ? 'Superadmin' : 'User'}</span><span className={`user-status ${user.status.toLowerCase()}`}>{user.status}</span><div className="row-actions"><button title="Edit" onClick={() => { setEditing(user); setShowForm(true) }}><Pencil size={15} /></button><button title={String(user.id) === String(currentUser?.id) ? 'Akun yang sedang digunakan tidak dapat dihapus' : 'Hapus user'} aria-label={`Hapus user ${user.name}`} onClick={() => setDeleteTarget(user)}><Trash2 size={15} /></button></div></div>)}</div></section>
     {showForm && <UserForm user={editing} onClose={() => setShowForm(false)} onSave={save} />}
@@ -2018,7 +2377,7 @@ function RecordFormWithId({ fields, record, role, nextNoId, onClose, onSave }) {
   const [noId, setNoId] = useState(record?.noId || nextNoId)
   const update = (key, value) => setValues((current) => ({ ...current, [key]: value }))
   const submit = (event) => { event.preventDefault(); onSave(values, noId) }
-  return <div className="modal-backdrop"><div className="modal large-modal"><div className="modal-head"><div><p className="eyebrow">{record ? 'EDIT DATA' : 'DATA BARU'}</p><h2>{record ? 'Perbarui pengajuan' : 'Tambah pengajuan hibah'}</h2></div><button className="close-btn" onClick={onClose}><X size={19} /></button></div><form onSubmit={submit}><div className="dynamic-form">{role === 'superadmin' ? <label className="field-group">No ID <b>*</b><input required pattern="ID-[0-9]{10}" value={noId} onChange={(event) => setNoId(event.target.value.toUpperCase())} placeholder="ID-0000000001" /><small className="field-hint">Format: ID-0000000001 sampai ID-9999999999</small></label> : <label className="field-group">No ID<input value={noId} readOnly /></label>}{fields.map((field) => <DynamicInputProfessional key={field.id} field={field} value={values[field.key]} onChange={(value) => update(field.key, value)} />)}</div><div className="modal-foot"><button type="button" className="secondary-btn" onClick={onClose}>Batal</button><button type="submit" className="primary-btn"><Check size={16} /> Simpan pengajuan</button></div></form></div></div>
+  return <div className="modal-backdrop"><div className="modal large-modal"><div className="modal-head"><div><p className="eyebrow">{record ? 'EDIT DATA' : 'DATA BARU'}</p><h2>{record ? 'Perbarui pengajuan' : 'Tambah pengajuan hibah'}</h2></div><strong className="record-form-no-id">{noId}</strong><button className="close-btn" onClick={onClose}><X size={19} /></button></div><form onSubmit={submit}><div className="dynamic-form">{role === 'superadmin' ? <label className="field-group">No ID <b>*</b><input required pattern="ID-[0-9]{10}" value={noId} onChange={(event) => setNoId(event.target.value.toUpperCase())} placeholder="ID-0000000001" /><small className="field-hint">Format: ID-0000000001 sampai ID-9999999999</small></label> : <label className="field-group">No ID<input value={noId} readOnly /></label>}{fields.map((field) => field.key === 'komoditas_ternak' ? <div className="commodity-checklist" key={field.id}><DynamicInputProfessional field={field} value={values[field.key]} onChange={(value) => update(field.key, value)} /></div> : <DynamicInputProfessional key={field.id} field={field} value={values[field.key]} onChange={(value) => update(field.key, value)} />)}</div><div className="modal-foot"><button type="button" className="secondary-btn" onClick={onClose}>Batal</button><button type="submit" className="primary-btn"><Check size={16} /> Simpan pengajuan</button></div></form></div></div>
 }
 
 function FieldsPageDnd({ fields, setFields }) {

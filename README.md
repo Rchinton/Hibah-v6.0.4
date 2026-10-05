@@ -5,7 +5,7 @@ MVP frontend interaktif untuk aplikasi pengelolaan hibah bidang peternakan berda
 ## Menjalankan lokal dengan Laragon
 
 1. Jalankan **MySQL** dari Laragon.
-2. Untuk instalasi baru, import `database/schema.sql` melalui HeidiSQL atau klien MySQL Laragon. Database `hibah_peternakan` beserta tabel `db_field`, `db_hibah`, `users`, `db_verification_field`, `db_hibah_verification`, `app_sync_changes`, dan metadata inisialisasi akan dibuat. Jika database versi sebelumnya sudah ada, jalankan migrasi yang belum diterapkan: `database/migration_add_field_prompts.sql`, `database/migration_add_users.sql`, `database/migration_add_user_whatsapp.sql`, `database/migration_add_verification.sql`, dan `database/migration_add_sync_changes.sql`.
+2. Untuk instalasi baru atau deployment ke perangkat lain, import `database/schema.sql`, lalu jalankan `database/migration_seed_current_config.sql` melalui HeidiSQL atau klien MySQL Laragon. Seed ini memasang konfigurasi Config Field, Form Verifikasi, pengumuman, styling pengumuman, dan Pustaka dari default sistem saat ini; seed tidak menyalin data hibah atau akun user. Jika database versi sebelumnya sudah ada, jalankan migrasi yang belum diterapkan: `database/migration_add_field_prompts.sql`, `database/migration_add_users.sql`, `database/migration_add_user_whatsapp.sql`, `database/migration_add_verification.sql`, `database/migration_add_sync_changes.sql`, `database/migration_add_app_settings.sql`, dan `database/migration_seed_current_config.sql`.
 3. Pastikan PHP Laragon aktif dan ekstensi `pdo_mysql` tersedia. Dari terminal proyek, jalankan API:
 
 ```powershell

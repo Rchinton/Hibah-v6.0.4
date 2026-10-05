@@ -245,7 +245,7 @@ function normalizeVerifications(array $verifications): array
             respond(['error' => 'Data hasil verifikasi tidak valid.'], 422);
         }
         $status = (string) ($verification['status'] ?? 'Terverifikasi');
-        if (!in_array($status, ['Terverifikasi', 'Perlu Perbaikan', 'Ditolak'], true)) {
+        if (!in_array($status, ['', 'Terverifikasi', 'Proses Berlangsung', 'Perlu Perbaikan', 'Ditolak'], true)) {
             respond(['error' => 'Status verifikasi tidak valid.'], 422);
         }
         $normalized[] = [
@@ -646,6 +646,115 @@ try {
 
     $action = $_GET['action'] ?? '';
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+    if ($action === 'library') {
+        $sessionUser = currentSessionUser($pdo);
+        if (!$sessionUser) {
+            respond(['error' => 'Sesi login tidak valid. Silakan login kembali.'], 401);
+        }
+
+        if ($method === 'GET') {
+            $statement = $pdo->prepare('SELECT setting_value FROM app_settings WHERE setting_key = :key LIMIT 1');
+            $statement->execute(['key' => 'library_items']);
+            $items = json_decode((string) ($statement->fetchColumn() ?: '[]'), true);
+            respond(['items' => is_array($items) ? $items : []]);
+        }
+
+        if ($method === 'PUT') {
+            if ($sessionUser['role'] !== 'superadmin') {
+                respond(['error' => 'Hanya Superadmin yang dapat mengubah Pustaka.'], 403);
+            }
+            $body = requestBody();
+            if (!is_array($body['items'] ?? null) || count($body['items']) > 500) {
+                respond(['error' => 'Daftar Pustaka tidak valid atau melebihi 500 dokumen.'], 422);
+            }
+            $items = [];
+            foreach (array_values($body['items']) as $item) {
+                if (!is_array($item)) {
+                    respond(['error' => 'Data dokumen Pustaka tidak valid.'], 422);
+                }
+                $name = trim((string) ($item['name'] ?? ''));
+                $documentNumber = trim((string) ($item['documentNumber'] ?? ''));
+                $documentDate = trim((string) ($item['documentDate'] ?? ''));
+                $url = trim((string) ($item['url'] ?? ''));
+                $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+                if ($name === '' || strlen($name) > 720 || strlen($url) > 2048
+                    || strlen($documentNumber) > 480
+                    || filter_var($url, FILTER_VALIDATE_URL) === false || !in_array($scheme, ['http', 'https'], true)) {
+                    respond(['error' => 'Nama dokumen wajib diisi dan hyperlink harus berupa URL http atau https yang valid.'], 422);
+                }
+                if ($documentDate !== '') {
+                    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $documentDate);
+                    if (!$date || $date->format('Y-m-d') !== $documentDate) {
+                        respond(['error' => 'Tanggal dokumen tidak valid.'], 422);
+                    }
+                }
+                $id = trim((string) ($item['id'] ?? ''));
+                $items[] = ['id' => $id !== '' && strlen($id) <= 80 ? $id : bin2hex(random_bytes(12)), 'name' => $name, 'documentNumber' => $documentNumber, 'documentDate' => $documentDate, 'url' => $url];
+            }
+            $statement = $pdo->prepare(
+                'INSERT INTO app_settings (setting_key, setting_value) VALUES (:key, :value)
+                 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP'
+            );
+            $statement->execute(['key' => 'library_items', 'value' => json_encode($items, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)]);
+            respond(['saved' => true, 'items' => $items]);
+        }
+    }
+
+    if ($action === 'app-settings') {
+        $sessionUser = currentSessionUser($pdo);
+        if (!$sessionUser) {
+            respond(['error' => 'Sesi login tidak valid. Silakan login kembali.'], 401);
+        }
+
+        if ($method === 'GET') {
+            $statement = $pdo->query("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('announcement', 'announcement_style')");
+            $settings = [];
+            foreach ($statement->fetchAll() as $setting) $settings[$setting['setting_key']] = $setting['setting_value'];
+            $style = json_decode($settings['announcement_style'] ?? '', true);
+            if (!is_array($style)) $style = [];
+            respond([
+                'announcement' => $settings['announcement'] ?? 'Pengumuman-pengumuman.... mohon perhatian...!',
+                'style' => array_merge(['textColor' => '#000000', 'backgroundColor' => '#f4f4a4', 'fontSize' => 12, 'speed' => 24, 'transparency' => 0], $style),
+            ]);
+        }
+
+        if ($method === 'PUT') {
+            if ($sessionUser['role'] !== 'superadmin') {
+                respond(['error' => 'Hanya Superadmin yang dapat mengubah pengaturan sistem aplikasi.'], 403);
+            }
+            $body = requestBody();
+            $announcement = $body['announcement'] ?? null;
+            if (!is_string($announcement) || trim($announcement) === '' || strlen($announcement) > 60000) {
+                respond(['error' => 'Siaran wajib diisi dan maksimal 60 KB.'], 422);
+            }
+            $style = $body['style'] ?? null;
+            if (!is_array($style)) {
+                respond(['error' => 'Pengaturan tampilan pengumuman tidak valid.'], 422);
+            }
+            $textColor = (string) ($style['textColor'] ?? '');
+            $backgroundColor = (string) ($style['backgroundColor'] ?? '');
+            $fontSize = filter_var($style['fontSize'] ?? null, FILTER_VALIDATE_INT);
+            $speed = filter_var($style['speed'] ?? null, FILTER_VALIDATE_INT);
+            $transparency = filter_var($style['transparency'] ?? null, FILTER_VALIDATE_INT);
+            if (!preg_match('/^#[0-9a-fA-F]{6}$/', $textColor) || !preg_match('/^#[0-9a-fA-F]{6}$/', $backgroundColor)
+                || $fontSize === false || $fontSize < 10 || $fontSize > 28
+                || $speed === false || $speed < 8 || $speed > 60
+                || $transparency === false || $transparency < 0 || $transparency > 100) {
+                respond(['error' => 'Nilai tampilan pengumuman berada di luar batas yang diizinkan.'], 422);
+            }
+            $normalizedStyle = compact('textColor', 'backgroundColor', 'fontSize', 'speed', 'transparency');
+            $statement = $pdo->prepare(
+                'INSERT INTO app_settings (setting_key, setting_value) VALUES (:key, :value)
+                 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP'
+            );
+            $pdo->beginTransaction();
+            $statement->execute(['key' => 'announcement', 'value' => $announcement]);
+            $statement->execute(['key' => 'announcement_style', 'value' => json_encode($normalizedStyle, JSON_THROW_ON_ERROR)]);
+            $pdo->commit();
+            respond(['saved' => true, 'announcement' => $announcement, 'style' => $normalizedStyle]);
+        }
+    }
 
     if ($action === 'sync' && $method === 'GET') {
         $sessionUser = currentSessionUser($pdo);
